@@ -1,0 +1,20 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+optimizer = true
+solc_version = "0.8.26"
+optimizer_runs = 1
+via_ir = true
+
+[profile.test]
+# Verbosity level for tests, e.g., -vvv for detailed logs
+
+[fuzz]
+runs = 256
+
+[rpc_endpoints]
+arbitrum_sepolia = "${RPC_URL}"
+
+[etherscan]
+arbitrum_sepolia = { key = "${ETHERSCAN_API_KEY}", url = "https://api-sepolia.arbiscan.io/api" }
