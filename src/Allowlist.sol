@@ -9,6 +9,7 @@ contract Allowlist is Ownable, AccessControl {
     mapping(address => bool) private allowlist; // Made private to ensure access through getter
 
     event Allowlisted(address indexed account);
+    event RemovedFromAllowlist(address indexed account); // New: Event for removal
 
     modifier isAdminOrOwner() {
         require(
@@ -30,6 +31,7 @@ contract Allowlist is Ownable, AccessControl {
 
     function removeFromAllowlist(address _address) external isAdminOrOwner {
         allowlist[_address] = false;
+        emit RemovedFromAllowlist(_address); // Fixed: Emitting event on removal
     }
 
     function isAllowlisted(address _address) public view returns (bool) {

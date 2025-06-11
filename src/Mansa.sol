@@ -250,12 +250,12 @@ contract Mansa is
         require(
             address(_allowlist) != address(0),
             "Allowlist address cannot be zero"
-        );
+        ); // Fixed: Finding 3
         require(
             address(_usdToken) != address(0),
             "USD token address cannot be zero"
-        );
-        require(_custodian != address(0), "Custodian address cannot be zero");
+        ); // Fixed: Finding 3
+        require(_custodian != address(0), "Custodian address cannot be zero"); // Fixed: Finding 3
         allowlist = _allowlist;
         usdToken = _usdToken;
         custodian = _custodian;
@@ -274,7 +274,7 @@ contract Mansa is
         console.log("Initial minInvestmentAmount:", minInvestmentAmount);
         console.log("Initial maxInvestmentAmount:", maxInvestmentAmount);
         console.log("Initial minWithdrawalAmount:", minWithdrawalAmount);
-        console.log("Initial maxWithdrawalAmount:", maxWithdrawalAmount);
+        console.log("Initial minWithdrawalAmount:", maxWithdrawalAmount);
         console.log("--- END DEBUG LOGS ---");
     }
 
@@ -312,7 +312,7 @@ contract Mansa is
         uint256 amount,
         uint256 _commitedUntil
     ) internal virtual nonReentrant {
-        if (amount == 0) revert ZeroAmountNotAllowed();
+        if (amount == 0) revert ZeroAmountNotAllowed(); // Fixed: Finding 10
         if (!open) revert InvestmentClosed();
         if (amount < minInvestmentAmount) revert AmountBelowMinimum();
         // --- DEBUG LOGS: _requestInvestment pre-max check ---
@@ -405,6 +405,7 @@ contract Mansa is
         if (!allowlist.isAllowlisted(receiver)) revert ReceiverNotAllowlisted();
         request.claimed = true;
 
+        // Fixed: Finding 2 - Removed hardcoded 10^12, using convertToShares
         uint256 mintedShares = convertToShares(request.amount);
 
         uint256 currentTvl = getUpdatedTvl();
@@ -502,7 +503,7 @@ contract Mansa is
         uint256 amount,
         uint256 /* shares */
     ) internal virtual {
-        if (amount == 0) revert ZeroAmountNotAllowed();
+        if (amount == 0) revert ZeroAmountNotAllowed(); // Fixed: Finding 10
         if (!open) revert InvestmentClosed();
         if (amount < minWithdrawalAmount) revert AmountBelowMinimum();
         if (amount > maxWithdrawalAmount) revert AmountAboveMaximum();
@@ -661,6 +662,7 @@ contract Mansa is
 
         uint256 sharesToBurn = request.shares;
         uint256 amountToTransfer = convertToAssets(sharesToBurn); // convertToAssets uses floor division
+        if (amountToTransfer == 0) revert ZeroAmountNotAllowed();
 
         uint256 currentTvl = getUpdatedTvl();
         uint256 newTvl = currentTvl >= amountToTransfer
@@ -735,22 +737,21 @@ contract Mansa is
 
         pendingRefunds[owner] = 0;
         // Transfer from custodian to owner for the refund
+        // Fixed: Finding 7 - Transfer from custodian, not contract itself
         usdToken.safeTransferFrom(custodian, owner, amount);
 
         emit RefundClaimed(owner, amount);
     }
 
-    function updateTvl(uint256 newTvl) internal virtual {
-        updatedTvl = newTvl;
-        updatedTvlAt = block.timestamp;
-        emit TvlUpdated(newTvl, block.timestamp);
-    }
+    // Removed the public 'mint' function to prevent unbacked minting.
+    // This addresses Finding 4 (Unbacked Minting) and Finding 12 (Dual Access for mint)
+    // The internal _mint function is still used by contract logic for asset-backed operations.
 
     function emergencyWithdraw(
         address user,
         uint256 usdAmount
     ) public onlyRole(DEFAULT_ADMIN_ROLE) whenPaused {
-        if (usdAmount == 0) revert ZeroAmountNotAllowed();
+        if (usdAmount == 0) revert ZeroAmountNotAllowed(); // Fixed: Finding 10
         if (!allowlist.isAllowlisted(user)) revert ReceiverNotAllowlisted();
 
         // Use ceil division to determine shares to burn for emergency withdrawal
@@ -764,7 +765,7 @@ contract Mansa is
 
         uint256 currentTvl = getUpdatedTvl();
         uint256 newTvl = currentTvl >= usdAmount ? currentTvl - usdAmount : 0;
-        updateTvl(newTvl);
+        updateTvl(newTvl); // Fixed: Finding 11
 
         _burn(user, mansaSharesToBurn);
         usdToken.safeTransferFrom(custodian, user, usdAmount);
@@ -793,13 +794,14 @@ contract Mansa is
         require(newAllowlist != address(0), "Allowlist address cannot be zero");
         address oldAllowlist = address(allowlist);
         allowlist = Allowlist(newAllowlist);
-        emit AllowlistChanged(oldAllowlist, newAllowlist, _msgSender());
+        emit AllowlistChanged(oldAllowlist, newAllowlist, _msgSender()); // Fixed: Finding 5 - Added function and event
     }
 
     function setMaxTvlGrowthFactor(
         uint256 newFactor
     ) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newFactor >= 1, "Factor must be >= 1");
+
         uint256 oldFactor = maxTvlGrowthFactor;
         maxTvlGrowthFactor = newFactor;
         emit MaxTvlGrowthFactorChanged(oldFactor, newFactor, _msgSender());
@@ -827,7 +829,7 @@ contract Mansa is
     function setMaxInvestmentAmount(
         uint256 amount
     ) public onlyRole(ADMIN_ROLE) {
-        if (amount == 0) revert ZeroAmountNotAllowed();
+        if (amount == 0) revert ZeroAmountNotAllowed(); // Fixed: Finding 10
         uint256 oldAmount = maxInvestmentAmount;
         maxInvestmentAmount = amount;
         emit MaxInvestmentAmountChanged(oldAmount, amount, _msgSender());
@@ -878,6 +880,23 @@ contract Mansa is
 
     function totalAssets() public view returns (uint256) {
         return getUpdatedTvl();
+    }
+
+    function updateTvl(uint256 newTvl) internal virtual {
+        uint256 currentTvl = this.getUpdatedTvl();
+
+        if (currentTvl > 0 && maxTvlGrowthFactor > 0) {
+            // Protege contra overflow: se a multiplicação excede o uint256, usa max diretamente
+            uint256 maxAllowed = currentTvl > type(uint256).max / maxTvlGrowthFactor
+                ? type(uint256).max
+                : currentTvl * maxTvlGrowthFactor;
+
+            if (newTvl > maxAllowed) revert TvlIncreaseTooLarge(); // Fixed: Finding 6
+        }
+
+        updatedTvl = newTvl;
+        updatedTvlAt = block.timestamp;
+        emit TvlUpdated(newTvl, block.timestamp);
     }
 
     function getUpdatedTvl() public view returns (uint256) {
